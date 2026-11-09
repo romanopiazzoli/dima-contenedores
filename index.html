@@ -143,7 +143,7 @@ label.full{grid-column:1/-1}
 <script type="module">
 import {createClient} from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
 import {SUPABASE_URL,SUPABASE_ANON_KEY} from "./supabase-config.js";
-const TIPO_LINK=(location.hash.match(/type=(\w+)/)||[])[1]||""; // invite / recovery, leído antes de que supabase limpie la URL
+const TIPO_LINK=(location.hash.match(/[#&]type=(\w+)/)||[])[1]||"";const ERR_LINK=/[#&?]error/.test(location.hash+location.search); // invite / recovery, leído antes de que supabase limpie la URL
 const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 // Adaptador: misma interfaz de documentos que usaba la versión de claude.ai.
 // Cada tabla (contenedores, clientes, movimientos, config) tiene columnas id (texto) y data (jsonb).
@@ -692,7 +692,7 @@ sb.auth.onAuthStateChange((ev,ses)=>{
   if(ev==="PASSWORD_RECOVERY"){recuperando=true;pantallaNuevaClave();return}
   if(ses&&ses.user&&(TIPO_LINK==="invite"||TIPO_LINK==="recovery")&&!recuperando){recuperando=true;pantallaNuevaClave();return}
   if(ses&&ses.user){setTimeout(()=>entrar(ses.user),0)}
-  else if(ev==="SIGNED_OUT"||ev==="INITIAL_SESSION"){if(!iniciado&&!recuperando)pantallaLogin()}
+  else if(ev==="SIGNED_OUT"||ev==="INITIAL_SESSION"){if(!iniciado&&!recuperando)pantallaLogin(ERR_LINK?"Ese enlace ya se usó o venció. Escribe tu correo y presiona «Olvidé mi contraseña» para recibir uno nuevo.":"")}
 });
 function iniciar(){(async()=>{
   const db=FDB;
