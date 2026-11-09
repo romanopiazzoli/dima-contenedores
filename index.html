@@ -462,8 +462,8 @@ function verMovimiento(m){
 
 // ---------- Vistas ----------
 function exampleNote(){
-  if(S.importPend&&!S.importando)return `<div class="note"><span>Están listos los datos iniciales (traspasados desde el <b>Sistema de Gestión</b>): ${S.importPend.conts} contenedores, ${S.importPend.clis} clientes con arriendo vigente y ${S.importPend.movs} arriendos en curso. Importar toma 1 a 2 minutos y se hace una sola vez.</span><button class="sm primary" id="do-imp">Importar ahora</button></div>`;
-  if(S.importando)return `<div class="note"><span>Importando datos del Sistema de Gestión… ${S.importando.hechos} de ${S.importando.total}. No cierres esta página.</span></div>`;
+  if(!S.importando&&S.loaded.conts&&S.loaded.clis&&S.loaded.movs&&S.conts.size===0)return `<div class="note"><span>La base de datos está vacía. Carga el archivo <b>datos-iniciales.json</b> (está en tu carpeta Documentos › Dima plataforma) o un <b>respaldo</b> descargado desde esta plataforma. Toma 1 a 2 minutos.</span><label class="btn sm primary" style="flex-direction:row;color:var(--accent-fg);background:var(--accent);border-color:var(--accent);cursor:pointer">Elegir archivo…<input type="file" id="imp-file" accept=".json,application/json" hidden></label></div>`;
+  if(S.importando)return `<div class="note"><span>Cargando datos… ${S.importando.hechos} de ${S.importando.total}. No cierres esta página.</span></div>`;
   const n=[...S.conts.values(),...S.clis.values(),...S.movs.values()].filter(x=>x.ejemplo).length;
   return n?`<div class="note"><span>Hay ${n} registros de <b>ejemplo</b> para que veas cómo funciona. Bórralos cuando empieces a cargar tus datos reales.</span><button class="sm" id="del-ej">Borrar datos de ejemplo</button></div>`:"";
 }
@@ -554,7 +554,7 @@ function vistaMovimientos(){
   const tot=list.reduce((s,m)=>s+calcMov(m).neto,0);
   const chip=(k,l)=>`<button class="chip" data-fm="${k}" aria-pressed="${f===k}">${l} <span class="muted">${cnt[k]}</span></button>`;
   return `${exampleNote()}
-  <div class="row between"><h1>Movimientos</h1><div class="row"><button id="respaldo">Respaldo completo</button><button id="csv">Exportar CSV</button><button id="q-ven">Registrar venta</button><button class="primary" id="q-arr">Registrar salida</button></div></div>
+  <div class="row between"><h1>Movimientos</h1><div class="row"><button id="respaldo">Respaldo completo</button><label class="btn" style="flex-direction:row;color:var(--fg);font-size:14px;cursor:pointer">Restaurar respaldo<input type="file" id="rest-file" accept=".json,application/json" hidden></label><button id="csv">Exportar CSV</button><button id="q-ven">Registrar venta</button><button class="primary" id="q-arr">Registrar salida</button></div></div>
   <div class="chips">${chip("todos","Todos")}${chip("activos","Arriendos en curso")}${chip("cerrados","Arriendos cerrados")}${chip("ventas","Ventas")}</div>
   <div class="panel">${list.length?`<div class="scroll"><table><thead><tr><th>Operación</th><th>Contenedor</th><th>Cliente</th><th>Salida</th><th>Ingreso</th><th class="num">Días</th><th class="num">Neto</th><th class="num">Total c/IVA</th><th></th></tr></thead><tbody>
   ${list.map(m=>{const r=calcMov(m);const arr=m.tipo==="arriendo";return`<tr><td>${arr?`<button class="link" data-mov="${m.id}">Arriendo ${m.modalidad==="diario"?"diario":"mensual"}</button>`:`<button class="link" data-mov="${m.id}">Venta</button>`}</td><td class="mono">${esc(contCode(m.contenedorId))}</td><td>${esc(cliName(m.clienteId))}</td><td>${fdate(m.fechaSalida)}</td><td>${!arr?"—":m.fechaIngreso?fdate(m.fechaIngreso):(vencido(m)?'<span class="pill p-venc">Vencido</span>':'<span class="pill p-arr">En terreno</span>')}</td><td class="num">${arr?r.dias:"—"}</td><td class="num">${clp(r.neto)}</td><td class="num">${clp(r.total)}</td><td class="num">${arr&&!m.fechaIngreso?`<button class="sm" data-ing="${m.id}">Registrar ingreso</button>`:""}</td></tr>`}).join("")}
@@ -585,7 +585,6 @@ document.addEventListener("click",e=>{
   else if(t.id==="csv")exportarCSV();
   else if(t.id==="respaldo")respaldo();
   else if(t.id==="del-ej")borrarEjemplos();
-  else if(t.id==="do-imp")importar();
   else if(d.hist)verHistorial(S.conts.get(d.hist));
   else if(d.cli)verCliente(S.clis.get(d.cli));
   else if(d.mov)verMovimiento(S.movs.get(d.mov));
@@ -602,9 +601,22 @@ document.addEventListener("input",e=>{
 });
 window.addEventListener("hashchange",()=>{closeModal();render();window.scrollTo(0,0)});
 
-async function importar(){
+function aLista(o){
+  if(Array.isArray(o))return o.filter(x=>x&&x.c&&x.id&&x.d);
+  const out=[];for(const c of ["contenedores","clientes","movimientos"])(o&&o[c]||[]).forEach(x=>{if(x&&x.id){const {id,...d}=x;out.push({c,id,d})}});return out;
+}
+async function leerArchivo(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  try{const lista=aLista(JSON.parse(await f.text()));if(!lista.length){toast("El archivo no tiene datos de la plataforma.");return}importar(lista)}
+  catch(e){toast("No se pudo leer el archivo. Debe ser datos-iniciales.json o un respaldo de esta plataforma.")}
+  input.value="";
+}
+document.addEventListener("change",e=>{
+  if(e.target.id==="imp-file")leerArchivo(e.target);
+  if(e.target.id==="rest-file")leerArchivo(e.target);
+});
+async function importar(lista){
   if(S.importando)return;
-  let lista;try{lista=await fetch("datos-iniciales.json").then(r=>r.json())}catch(e){toast("No se pudo leer el archivo de importación.");return}
   const ej=[...[...S.movs.values()].filter(x=>x.ejemplo).map(x=>"movimientos/"+x.id),...[...S.conts.values()].filter(x=>x.ejemplo).map(x=>"contenedores/"+x.id),...[...S.clis.values()].filter(x=>x.ejemplo).map(x=>"clientes/"+x.id)];
   const tareas=[...ej.map(p=>({del:p})),...lista.map(x=>({path:x.c+"/"+x.id,d:{...x.d,creado:Date.now()}}))];
   S.importando={hechos:0,total:tareas.length};render();
@@ -615,9 +627,8 @@ async function importar(){
     S.importando.hechos++;if(S.importando.hechos%25===0)render()}};
   await Promise.all([worker(),worker(),worker(),worker()]);
   try{await S.db.doc("config/importacion").set({fecha:new Date().toISOString(),registros:lista.length,fallos})}catch(e){}
-  S.importando=null;S.importPend=null;render();
+  S.importando=null;render();
   toast(fallos?`Importación terminada con ${fallos} registros sin guardar. Vuelve a intentarlo.`:"Importación terminada");
-  if(fallos)S.importPend=S._pendInfo;
 }
 function borrarEjemplos(){
   const docs=[...[...S.movs.values()].map(x=>"movimientos/"+x.id+"|"+(x.ejemplo?1:0)),...[...S.conts.values()].map(x=>"contenedores/"+x.id+"|"+(x.ejemplo?1:0)),...[...S.clis.values()].map(x=>"clientes/"+x.id+"|"+(x.ejemplo?1:0))].filter(s=>s.endsWith("|1")).map(s=>s.slice(0,-2));
@@ -686,10 +697,6 @@ sb.auth.onAuthStateChange((ev,ses)=>{
 function iniciar(){(async()=>{
   const db=FDB;
   S.db=db;
-  db.doc("config/importacion").get().then(async snap=>{if(snap.exists)return;
-    try{const l=await fetch("datos-iniciales.json").then(r=>{if(!r.ok)throw 0;return r.json()});
-      const n=c=>l.filter(x=>x.c===c).length;S._pendInfo=S.importPend={conts:n("contenedores"),clis:n("clientes"),movs:n("movimientos")};render()}catch(e){}
-  }).catch(()=>{});
   const timer=setTimeout(()=>{S.stale=true;render()},10000);
   const sub=(name,key)=>db.collection(name).onSnapshot(snap=>{
     const m=new Map();snap.docs.forEach(d=>m.set(d.id,{id:d.id,...d.data()}));S[key]=m;
