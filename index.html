@@ -122,6 +122,11 @@ label.full{grid-column:1/-1}
 .login .pb{display:flex;flex-direction:column;gap:14px;padding:24px}
 
 .tile .v{white-space:nowrap;font-size:clamp(20px,2.3vw,32px)}@media (max-width:640px){.tile .v{font-size:22px}}
+.lbl{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:500;color:var(--muted);min-width:0}.lbl.full{grid-column:1/-1}
+.combo{position:relative;flex:1;min-width:0}.combo-q{width:100%}
+.combo-list{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 2px);max-height:300px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px rgba(0,0,0,.18);font-size:14px;color:var(--fg);font-weight:400}
+.combo-op{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line)}.combo-op:last-child{border-bottom:0}.combo-op.act,.combo-op:hover{background:var(--accent-soft)}
+.combo-op mark{background:transparent;color:var(--accent);font-weight:700}.combo-vacio{padding:9px 11px;color:var(--muted);font-size:13px}
 a.tile{text-decoration:none;color:inherit}a.tile:hover{border-color:var(--accent)}
 .tile.alerta .v{color:var(--bad)}
 tr.clic{cursor:pointer}
@@ -156,6 +161,6 @@ body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
 </div></header>
 <main class="wrap" id="app"><div class="empty"><b>Cargando…</b></div></main>
 <div id="modal-root"></div>
-<script type="module" src="app.js?v=2"></script>
+<script type="module" src="app.js?v=3"></script>
 </body>
 </html>
