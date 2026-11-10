@@ -393,6 +393,28 @@ function vMas(){
 }
 
 // ---------- selectores ----------
+// ---------- selector con búsqueda (escribe y filtra) ----------
+function combo(id,opciones,sel,ph){const o=opciones.find(x=>x.v===sel);
+  return`<div class="combo" data-combo="${id}"><input type="hidden" id="${id}" value="${esc(o?sel:"")}"><input id="${id}-q" class="combo-q" autocomplete="off" spellcheck="false" placeholder="${esc(ph)}" value="${esc(o?o.t:"")}"><div class="combo-list" hidden></div></div>`}
+function montarCombo(sc,id,opciones,onPick){
+  const box=sc.querySelector(`[data-combo="${id}"]`);if(!box)return;const q=box.querySelector(".combo-q"),h=box.querySelector("input[type=hidden]"),list=box.querySelector(".combo-list");let act=0,vis=[];
+  const marcar=(t,w)=>{let r=esc(t);w.forEach(x=>{if(!x)return;const i=norm(t).indexOf(x);if(i>=0)r=esc(t.slice(0,i))+"<mark>"+esc(t.slice(i,i+x.length))+"</mark>"+esc(t.slice(i+x.length))});return r};
+  const pintar=()=>{const w=norm(q.value).split(/\s+/).filter(Boolean);const sel=opciones.find(o=>o.v===h.value);const ws=sel&&q.value===sel.t?[]:w;
+    vis=opciones.filter(o=>{const t=norm(o.t+" "+(o.s||""));return ws.every(x=>t.includes(x))});const total=vis.length;vis=vis.slice(0,60);act=0;
+    list.innerHTML=vis.length?vis.map((o,i)=>`<div class="combo-op${i===act?" act":""}" data-i="${i}">${marcar(o.t,ws.slice(0,1))}${o.s?` <span class="muted small">${esc(o.s)}</span>`:""}</div>`).join("")+(total>60?`<div class="combo-vacio">Sigue escribiendo para ver más (${total} resultados)</div>`:""):`<div class="combo-vacio">Sin resultados para “${esc(q.value)}”</div>`;list.hidden=false};
+  const elegir=i=>{const o=vis[i];if(!o)return;h.value=o.v;q.value=o.t;list.hidden=true;if(onPick)onPick(o.v)};
+  q.addEventListener("focus",()=>{q.select();pintar()});
+  q.addEventListener("input",()=>{h.value="";pintar()});
+  q.addEventListener("keydown",e=>{
+    if(e.key==="Escape"&&!list.hidden){e.stopPropagation();list.hidden=true;return}
+    if(list.hidden&&(e.key==="ArrowDown")){pintar();return}
+    if(list.hidden)return;
+    if(e.key==="ArrowDown")act=Math.min(act+1,vis.length-1);else if(e.key==="ArrowUp")act=Math.max(act-1,0);else if(e.key==="Enter"){e.preventDefault();elegir(act);return}else if(e.key==="Tab"){if(q.value&&!h.value&&vis.length)elegir(act);return}else return;
+    e.preventDefault();list.querySelectorAll(".combo-op").forEach((d,i)=>d.classList.toggle("act",i===act));list.querySelector(".act")?.scrollIntoView({block:"nearest"})});
+  list.addEventListener("mousedown",e=>{e.preventDefault();const d=e.target.closest(".combo-op");if(d)elegir(+d.dataset.i)});
+  q.addEventListener("blur",()=>setTimeout(()=>{list.hidden=true;if(!h.value&&q.value){const ex=opciones.find(o=>norm(o.t)===norm(q.value));if(ex){h.value=ex.v;q.value=ex.t;if(onPick)onPick(ex.v)}}},120));
+}
+const opsClientes=()=>all("clientes").sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>({v:c.id,t:c.nombre,s:[c.rut,c.contacto].filter(Boolean).join(" · ")}));
 const optsClientes=sel=>`<option value="">Selecciona un cliente…</option>`+all("clientes").sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(c=>`<option value="${esc(c.id)}" ${c.id===sel?"selected":""}>${esc(c.nombre)}${c.rut?" · "+esc(c.rut):""}</option>`).join("");
 function datalistDisponibles(id,incluir=[]){
   const ok=all("contenedores").filter(c=>estadoCont(c)==="disponible"||incluir.includes(c.id)).sort((a,b)=>a.codigo.localeCompare(b.codigo,undefined,{numeric:true}));
@@ -472,7 +494,7 @@ function verContenedor(id){
 
 // ---------- CONTRATO ----------
 function filaItem(it,i){
-  return`<tr data-fila="${i}"><td><input class="mono it-cod" list="dl-disp" value="${esc(it.codigo||contCod(it.contenedorId)||"")}" placeholder="Código" ${it.fijo?"disabled":""}></td><td class="it-tipo small muted">${esc(get("contenedores",it.contenedorId)?.tipo||"")}</td><td><input class="it-tar" inputmode="numeric" value="${esc(it.tarifa||"")}" placeholder="Tarifa neta"></td><td><input class="it-sal" type="date" value="${esc(it.salida||"")}"></td><td><input class="it-guia" value="${esc(it.guia||"")}" placeholder="N° guía"></td><td>${it.fijo?"":`<button class="sm" data-quitar="${i}" type="button" aria-label="Quitar">✕</button>`}</td></tr>`;
+  return`<tr data-fila="${i}"><td><input class="mono it-cod" list="dl-disp" value="${esc(it.codigo||(it.contenedorId?contCod(it.contenedorId):""))}" placeholder="Código" ${it.fijo?"disabled":""}></td><td class="it-tipo small muted">${esc(get("contenedores",it.contenedorId)?.tipo||"")}</td><td><input class="it-tar" inputmode="numeric" value="${esc(it.tarifa||"")}" placeholder="Tarifa neta"></td><td><input class="it-sal" type="date" value="${esc(it.salida||"")}"></td><td><input class="it-guia" value="${esc(it.guia||"")}" placeholder="N° guía"></td><td>${it.fijo?"":`<button class="sm" data-quitar="${i}" type="button" aria-label="Quitar">✕</button>`}</td></tr>`;
 }
 function formContrato(c,pre={}){
   const nuevo=!c;c=c?JSON.parse(JSON.stringify(c)):{numero:sigNumero("contratos"),inicio:hoy(),traslado:"Dima Maquinarias",clienteId:pre.clienteId||"",items:[]};
@@ -482,7 +504,7 @@ function formContrato(c,pre={}){
   const sc=modal(nuevo?"Nuevo contrato":"Editar contrato N° "+c.numero,`<div class="fg">
     <label>N° contrato<input id="t-num" inputmode="numeric" value="${esc(c.numero)}"></label>
     <label>Fecha de inicio *<input id="t-ini" type="date" value="${esc(c.inicio)}"></label>
-    <label class="full">Cliente *<div class="row" style="flex-wrap:nowrap"><select id="t-cli">${optsClientes(c.clienteId)}</select><button class="sm" type="button" id="t-ncli">+ Nuevo</button></div></label>
+    <div class="lbl full">Cliente *<div class="row" style="flex-wrap:nowrap">${combo("t-cli",opsClientes(),c.clienteId,"Escribe para buscar: nombre, RUT o contacto")}<button class="sm" type="button" id="t-ncli">+ Nuevo</button></div></div>
     <label>N° orden de compra<input id="t-oc" value="${esc(c.oc)}"></label><label>Fecha OC<input id="t-ocf" type="date" value="${esc(c.ocFecha)}"></label>
     <label>Contacto<input id="t-con" value="${esc(c.contacto)}"></label><label>Teléfono<input id="t-tel" value="${esc(c.telefono)}"></label>
     <label>Email<input id="t-mail" value="${esc(c.email)}"></label><label>Traslado<select id="t-tras">${TRASLADOS.map(x=>`<option ${c.traslado===x?"selected":""}>${x}</option>`).join("")}</select></label>
@@ -497,6 +519,7 @@ function formContrato(c,pre={}){
     <label>Cuenta N°<input id="g-cta" value="${esc(g.cuenta)}"></label><label>Cheque N°<input id="g-che" value="${esc(g.cheque)}"></label><label>Monto<input id="g-mon" inputmode="numeric" value="${esc(g.monto||"")}"></label></div></details>
   <label class="full">Notas<textarea id="t-notas">${esc(c.notas)}</textarea></label>`,
   `<button data-close>Cancelar</button><button class="primary" id="ok">${nuevo?"Crear contrato":"Guardar cambios"}</button>`,null,true);
+  montarCombo(sc,"t-cli",opsClientes());
   const body=sc.querySelector("#t-items");
   const leer=()=>[...body.querySelectorAll("tr")].map(tr=>{const i=+tr.dataset.fila;const old=c.items[i]||{};const cod=tr.querySelector(".it-cod").value.trim();const k=contPorCodigo(cod);return{...old,contenedorId:k?.id||old.contenedorId||"",codigo:k?.codigo||cod,tarifa:num(tr.querySelector(".it-tar").value),salida:tr.querySelector(".it-sal").value,guia:tr.querySelector(".it-guia").value.trim()}});
   const calc=()=>{const its=leer().filter(i=>i.contenedorId&&!i.devolucion);const n=its.reduce((s,i)=>s+num(i.tarifa),0);sc.querySelector("#t-calc").innerHTML=`<span>${its.length} contenedor(es)</span><b>${clp(n)}</b><span class="tot">Mensual c/IVA</span><b class="tot">${clp(conIVA(n))}</b>`};
@@ -566,10 +589,11 @@ function formCerrar(c){
 function formPago(p,pre={}){
   const nuevo=!p;p=p||{fecha:hoy(),contratoId:pre.contratoId||"",periodo:pre.periodo||""};
   const vig=all("contratos").filter(c=>c.estado==="vigente"||c.id===p.contratoId).sort((a,b)=>num(b.numero)-num(a.numero));
+  const opsCtr=vig.map(c=>({v:c.id,t:`N° ${c.numero} · ${cliNom(c.clienteId)}`,s:[c.obra,(c.items||[]).filter(i=>!i.devolucion).map(i=>i.codigo).slice(0,3).join(" ")].filter(Boolean).join(" · ")}));
   const sugerir=(cid)=>{const d=ix().deuda.get(cid);return d?.[0]?.periodo||hoy().slice(0,7)};
   if(nuevo&&p.contratoId&&!p.periodo)p.periodo=sugerir(p.contratoId);
   modal(nuevo?"Registrar pago":"Editar pago",`<div class="fg">
-    <label class="full">Contrato *<select id="p-ctr"><option value="">Selecciona…</option>${vig.map(c=>`<option value="${c.id}" ${c.id===p.contratoId?"selected":""}>N° ${esc(c.numero)} · ${esc(cliNom(c.clienteId))}</option>`).join("")}</select></label>
+    <div class="lbl full">Contrato *${combo("p-ctr",opsCtr,p.contratoId,"Escribe N° de contrato, cliente u obra")}</div>
     <label>Período (mes que se paga) *<input id="p-per" type="month" value="${esc(p.periodo||hoy().slice(0,7))}"></label>
     <label>Fecha del pago<input id="p-f" type="date" value="${esc(p.fecha)}"></label>
     <label>Monto recibido (con IVA) *<input id="p-m" inputmode="numeric" value="${esc(p.monto||"")}"></label>
@@ -579,7 +603,7 @@ function formPago(p,pre={}){
     const info=()=>{const c=get("contratos",v(sc,"p-ctr"));if(!c){sc.querySelector("#p-info").textContent="";return}const m=conIVA(mensualCtr(c));const d=ix().deuda.get(c.id)||[];
       sc.querySelector("#p-info").textContent=`Mensual con IVA: ${clp(m)}. ${d.length?`Meses por cobrar: ${d.map(x=>fper(x.periodo)).join(", ")}.`:"Al día."}`;
       if(nuevo&&!v(sc,"p-m"))sc.querySelector("#p-m").value=m||""};
-    sc.querySelector("#p-ctr").onchange=()=>{if(nuevo)sc.querySelector("#p-per").value=sugerir(v(sc,"p-ctr"));sc.querySelector("#p-m").value="";info()};info();
+    montarCombo(sc,"p-ctr",opsCtr,()=>{if(nuevo)sc.querySelector("#p-per").value=sugerir(v(sc,"p-ctr"));sc.querySelector("#p-m").value="";info()});info();
     sc.querySelector("#ok").onclick=async()=>{
       const contratoId=v(sc,"p-ctr"),periodo=v(sc,"p-per"),monto=num(v(sc,"p-m"));
       if(!contratoId||!periodo||!monto){toast("Completa contrato, período y monto");return}
@@ -599,13 +623,14 @@ function formVenta(vt,pre={}){
   const fila=(it,i)=>`<tr data-fila="${i}"><td><input class="mono it-cod" list="dl-dv" value="${esc(it.codigo||"")}" placeholder="Código"></td><td class="it-tipo small muted">${esc(get("contenedores",it.contenedorId)?.tipo||"")}</td><td><input class="it-pre" inputmode="numeric" value="${esc(it.precio||"")}" placeholder="Precio neto"></td><td><button class="sm" type="button" data-quitar="${i}">✕</button></td></tr>`;
   const sc=modal(nuevo?"Nueva venta":"Venta N° "+vt.numero,`<div class="fg">
     <label>N° venta<input id="v-num" inputmode="numeric" value="${esc(vt.numero)}"></label><label>Fecha *<input id="v-f" type="date" value="${esc(vt.fecha)}"></label>
-    <label class="full">Cliente *<select id="v-cli">${optsClientes(vt.clienteId)}</select></label>
+    <div class="lbl full">Cliente *${combo("v-cli",opsClientes(),vt.clienteId,"Escribe para buscar: nombre, RUT o contacto")}</div>
     <label>N° factura<input id="v-fac" value="${esc(vt.factura)}"></label><label>N° OC<input id="v-oc" value="${esc(vt.oc)}"></label></div>
     <h3 class="sub">Contenedores vendidos</h3>${datalistDisponibles("dl-dv",vt.items.map(i=>i.contenedorId).filter(Boolean))}
     <div class="scroll"><table class="items"><thead><tr><th>Código</th><th>Tipo</th><th>Precio neto</th><th></th></tr></thead><tbody id="v-items">${vt.items.map(fila).join("")}</tbody></table></div>
     <div class="row between"><button class="sm" type="button" id="v-add">+ Agregar contenedor</button><div class="calc" id="v-calc" style="min-width:260px"></div></div>
     <label class="full">Notas<textarea id="v-n">${esc(vt.notas)}</textarea></label>`,
   `${!nuevo&&puedeEditar()?`<button class="danger" id="anu">${vt.estado==="anulada"?"Reactivar venta":"Anular venta"}</button><span style="flex:1"></span>`:""}<button data-close>Cancelar</button>${btnE(`<button class="primary" id="ok">${nuevo?"Registrar venta":"Guardar"}</button>`)}`,null,true);
+  montarCombo(sc,"v-cli",opsClientes());
   const body=sc.querySelector("#v-items");
   const leer=()=>[...body.querySelectorAll("tr")].map(tr=>{const cod=tr.querySelector(".it-cod").value.trim();const k=contPorCodigo(cod);return{contenedorId:k?.id||"",codigo:k?.codigo||cod,precio:num(tr.querySelector(".it-pre").value)}});
   const calc=()=>{const n=leer().reduce((s,i)=>s+num(i.precio),0);sc.querySelector("#v-calc").innerHTML=`<span>Neto</span><b>${clp(n)}</b><span>IVA</span><b>${clp(conIVA(n)-n)}</b><span class="tot">Total</span><b class="tot">${clp(conIVA(n))}</b>`};
