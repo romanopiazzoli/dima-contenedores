@@ -392,6 +392,106 @@ function vMas(){
   return`<h1>Configuración</h1>${chips("mas",tab,tabs.map(([k,l])=>[k,l]))}${cuerpo}`;
 }
 
+// ---------- GERENCIA (solo administradores) ----------
+function vGerencia(){
+  if(!esAdmin())return vacio("Sección solo para administradores","Pide acceso al administrador de la plataforma.");
+  const I=ix();const h=hoy();const per=h.slice(0,7);const conts=all("contenedores");
+  const ventasOk=all("ventas").filter(v=>v.estado!=="anulada");
+  const netoVenta=v=>(v.items||[]).reduce((s,i)=>s+num(i.precio),0);
+  const pagos=all("pagos");
+  // --- ingresos últimos 12 meses (pagos por fecha de pago; ventas por fecha) ---
+  const meses=[];for(let n=11;n>=0;n--)meses.push(addMonths(per+"-01",-n).slice(0,7));
+  const arr=Object.fromEntries(meses.map(m=>[m,0])),ven=Object.fromEntries(meses.map(m=>[m,0]));
+  pagos.forEach(p=>{const m=(p.fecha||p.periodo||"").slice(0,7);if(m in arr)arr[m]+=num(p.monto)});
+  ventasOk.forEach(v=>{const m=(v.fecha||"").slice(0,7);if(m in ven)ven[m]+=conIVA(netoVenta(v))});
+  const tot12=meses.reduce((s,m)=>s+arr[m]+ven[m],0);
+  const maxM=Math.max(1,...meses.map(m=>arr[m]+ven[m]));
+  // --- mes actual ---
+  const vig=all("contratos").filter(c=>c.estado==="vigente");
+  const esperado=vig.reduce((s,c)=>s+conIVA(mensualCtr(c)),0);
+  const cobradoPer=pagos.filter(p=>p.periodo===per).reduce((s,p)=>s+num(p.monto),0);
+  const pctCob=esperado?Math.min(100,Math.round(cobradoPer/esperado*100)):0;
+  // --- ventas del año vs año anterior (mismo período) ---
+  const y=+h.slice(0,4),md=h.slice(5);
+  const vAnio=ventasOk.filter(v=>(v.fecha||"").startsWith(y+"-")).reduce((s,v)=>s+conIVA(netoVenta(v)),0);
+  const vAnt=ventasOk.filter(v=>(v.fecha||"").startsWith((y-1)+"-")&&v.fecha.slice(5)<=md).reduce((s,v)=>s+conIVA(netoVenta(v)),0);
+  const varV=vAnt?Math.round((vAnio-vAnt)/vAnt*100):null;
+  // --- deuda por antigüedad y por cliente ---
+  const tramos=[["0 a 30 días",0,30],["31 a 60 días",31,60],["61 a 90 días",61,90],["Más de 90 días",91,1e9]].map(([l,a,b])=>({l,a,b,m:0,n:0}));
+  const porCli=new Map();let totDeuda=0;
+  for(const [id,pend] of I.deuda){const c=get("contratos",id);if(!c)continue;const mm=conIVA(mensualCtr(c));
+    pend.forEach(p=>{const d=dias(p.vence,h);const t=tramos.find(t=>d>=t.a&&d<=t.b);if(t){t.m+=mm;t.n++}totDeuda+=mm});
+    const k=c.clienteId||"?";const x=porCli.get(k)||{m:0,meses:0,ctrs:0};x.m+=mm*pend.length;x.meses=Math.max(x.meses,pend.length);x.ctrs++;porCli.set(k,x)}
+  const topDeu=[...porCli.entries()].sort((a,b)=>b[1].m-a[1].m).slice(0,8);
+  // --- flota y ocupación por tipo ---
+  const g={};
+  conts.forEach(c=>{const e=estadoCont(c);if(e==="vendido"||e==="baja")return;const t=c.tipo||"Otro";g[t]=g[t]||{total:0,arr:0,disp:0,ing:0};g[t].total++;if(e==="arrendado")g[t].arr++;if(e==="disponible")g[t].disp++});
+  for(const [cid,{item}] of I.activo){const c=get("contenedores",cid);const t=c?.tipo||"Otro";if(g[t])g[t].ing+=num(item.tarifa)}
+  const tipos=Object.keys(g).sort((a,b)=>g[b].ing-g[a].ing||g[b].total-g[a].total);
+  const flota=tipos.reduce((s,t)=>s+g[t].total,0),fuera=tipos.reduce((s,t)=>s+g[t].arr,0);
+  const ocup=flota?Math.round(fuera/flota*100):0;
+  // --- contenedores en terreno por mes (fin de cada mes) ---
+  const items=[];for(const c of S.d.contratos.values()){if(c.estado==="anulado")continue;(c.items||[]).forEach(it=>items.push({s:it.salida||c.inicio||"",d:it.devolucion||(c.estado==="vigente"?"":c.cierre||"")}))}
+  const terreno=meses.map(m=>{const fin=m===per?h:new Date(toUTC(addMonths(m+"-01",1))-864e5).toISOString().slice(0,10);
+    return{m,n:items.filter(x=>x.s&&x.s<=fin&&(!x.d||x.d>fin)).length}});
+  const maxT=Math.max(1,...terreno.map(x=>x.n));
+  // --- en terreno por cliente ---
+  const cli=new Map();for(const [cid,{ctr,item}] of I.activo){const k=ctr.clienteId||"?";const x=cli.get(k)||{n:0,m:0,obras:new Set()};x.n++;x.m+=num(item.tarifa);if(ctr.obra)x.obras.add(ctr.obra);cli.set(k,x)}
+  const topCli=[...cli.entries()].sort((a,b)=>b[1].n-a[1].n||b[1].m-a[1].m);
+  // --- disponibles sin arrendar ---
+  const quietos=conts.filter(c=>estadoCont(c)==="disponible").map(c=>{const hs=(I.contHist.get(c.id)||[]).filter(x=>x.tipo==="arriendo");
+    const ult=hs.map(x=>x.item.devolucion||"").filter(Boolean).sort().pop()||"";return{c,ult,d:ult?dias(ult,h):null,nunca:!hs.length}})
+    .sort((a,b)=>(b.nunca-a.nunca)||((b.d??-1)-(a.d??-1)));
+  // --- alertas ---
+  const lim=addMonths(h,1);
+  const porVencer=vig.filter(c=>c.vence&&c.vence>=h&&c.vence<=lim).sort((a,b)=>a.vence.localeCompare(b.vence));
+  const atraso2=[...I.deuda.entries()].map(([id,p])=>({c:get("contratos",id),n:p.filter(x=>dias(x.vence,h)>5).length})).filter(x=>x.c&&x.n>=2).sort((a,b)=>b.n-a.n);
+
+  const barra=(v,max,col)=>`<div class="gbar"><i style="width:${max?Math.max(v?1.5:0,v/max*100):0}%;background:${col}"></i></div>`;
+  return`<div class="row between"><h1>Gerencia</h1><span class="status">Resumen del negocio · ${fdate(h)}</span></div>
+  <div class="tiles gtiles">
+    <div class="tile"><span class="k">Ingresos últimos 12 meses</span><span class="v">${clp(tot12)}</span><span class="s">arriendos cobrados + ventas, con IVA</span></div>
+    <div class="tile"><span class="k">Cobrado ${fper(per)}</span><span class="v">${clp(cobradoPer)}</span><span class="s">${pctCob}% de ${clp(esperado)} esperado</span><div class="bar" aria-hidden="true"><i style="width:${pctCob}%;background:var(--ok)"></i></div></div>
+    <div class="tile ${totDeuda?"alerta":""}"><span class="k">Deuda total</span><span class="v">${clp(totDeuda)}</span><span class="s">${I.deuda.size} contratos con meses sin pago</span></div>
+    <div class="tile"><span class="k">Ventas ${y}</span><span class="v">${clp(vAnio)}</span><span class="s">${varV==null?"sin ventas a esta fecha en "+(y-1):(varV>=0?"+":"")+varV+"% vs. "+(y-1)+" a la misma fecha"}</span></div>
+    <div class="tile"><span class="k">Ocupación de la flota</span><span class="v">${ocup}%</span><span class="s">${fuera} en terreno de ${flota} · ${clp(conIVA(tipos.reduce((s,t)=>s+g[t].ing,0)))}/mes c/IVA</span></div>
+  </div>
+
+  <div class="panel"><div class="ph"><h2>Ingresos por mes</h2><span class="status"><span style="color:var(--info)">■</span> Arriendos cobrados <span style="color:#D98A2B">■</span> Ventas · con IVA</span></div>
+   <div class="pb"><div class="gcols">${meses.map(m=>{const a=arr[m],v=ven[m];return`<div class="gcol" title="${fper(m)}: arriendos ${clp(a)} · ventas ${clp(v)}"><span class="gval">${a+v?"$"+((a+v)/1e6).toFixed(1).replace(".",",")+"M":""}</span><div class="gstack"><i style="height:${v/maxM*100}%;background:#D98A2B"></i><i style="height:${a/maxM*100}%;background:var(--info)"></i></div><span class="glab">${fper(m).replace(/ 20(\d\d)/," <span class=\"gy\">$1</span>")}</span></div>`}).join("")}</div>
+   <p class="small muted" style="margin:10px 0 0">Arriendos según la fecha en que se pagaron. En los pagos traídos del sistema anterior el monto es aproximado (valor mensual del contrato).</p></div></div>
+
+  <div class="grid2">
+   <div class="panel"><div class="ph"><h2>Deuda por antigüedad</h2><span class="status">con IVA</span></div><div class="scroll"><table><tbody>
+    ${tramos.map(t=>`<tr><td style="white-space:nowrap">${t.l}</td><td class="num">${t.n} ${t.n===1?"mes":"meses"}</td><td class="num"><b>${clp(t.m)}</b></td><td style="width:35%">${barra(t.m,totDeuda,t.a>60?"var(--bad)":t.a>30?"var(--warn)":"var(--info)")}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td><b>Total</b></td><td></td><td class="num"><b>${clp(totDeuda)}</b></td><td></td></tr></tfoot></table></div></div>
+   <div class="panel"><div class="ph"><h2>Clientes que más deben</h2></div>${topDeu.length?`<div class="scroll"><table><thead><tr><th>Cliente</th><th class="num">Contratos</th><th class="num">Meses</th><th class="num">Deuda c/IVA</th></tr></thead><tbody>
+    ${topDeu.map(([k,x])=>`<tr><td>${cliLink(k)}</td><td class="num">${x.ctrs}</td><td class="num">${x.meses}</td><td class="num"><b>${clp(x.m)}</b></td></tr>`).join("")}</tbody></table></div>`:`<div class="pb muted">No hay deuda.</div>`}</div>
+  </div>
+
+  <div class="grid2">
+   <div class="panel"><div class="ph"><h2>Rendimiento por tipo</h2><span class="status">arriendo mensual neto</span></div><div class="scroll"><table><thead><tr><th>Tipo</th><th class="num">Flota</th><th class="num">En terreno</th><th class="num">Ocupación</th><th class="num">Ingreso/mes</th><th class="num">Por unidad</th></tr></thead><tbody>
+    ${tipos.map(t=>{const r=g[t];const o=r.total?Math.round(r.arr/r.total*100):0;return`<tr class="clic" data-filtro-tipo="${esc(t)}"><td>${esc(t)}</td><td class="num">${r.total}</td><td class="num">${r.arr}</td><td class="num"><span class="pill ${o>=80?"p-disp":o>=50?"p-mant":"p-venc"}">${o}%</span></td><td class="num">${clp(r.ing)}</td><td class="num">${clp(r.total?r.ing/r.total:0)}</td></tr>`}).join("")}
+    </tbody></table></div><p class="small muted pb" style="margin:0">“Por unidad” es el ingreso mensual dividido por toda la flota de ese tipo: muestra cuánto rinde cada contenedor que se tiene.</p></div>
+   <div class="panel"><div class="ph"><h2>Contenedores en terreno</h2><span class="status">al cierre de cada mes</span></div>
+    <div class="pb"><div class="gcols">${terreno.map(x=>`<div class="gcol" title="${fper(x.m)}: ${x.n}"><span class="gval">${x.n}</span><div class="gstack"><i style="height:${x.n/maxT*100}%;background:var(--info)"></i></div><span class="glab">${fper(x.m).replace(/ 20(\d\d)/," <span class=\"gy\">$1</span>")}</span></div>`).join("")}</div></div></div>
+  </div>
+
+  <div class="grid2">
+   <div class="panel"><div class="ph"><h2>En terreno por cliente</h2><span class="status">${topCli.length} clientes</span></div>${topCli.length?`<div class="scroll" style="max-height:420px"><table><thead><tr><th>Cliente</th><th>Obras</th><th class="num">Cont.</th><th class="num">Mensual neto</th></tr></thead><tbody>
+    ${topCli.map(([k,x])=>`<tr><td>${cliLink(k)}</td><td class="trunc small">${esc([...x.obras].join(" · ")||"—")}</td><td class="num"><b>${x.n}</b></td><td class="num">${clp(x.m)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="pb muted">No hay contenedores en terreno.</div>`}</div>
+   <div class="panel"><div class="ph"><h2>Disponibles sin arrendar</h2><span class="status">${quietos.length} en patio</span></div>${quietos.length?`<div class="scroll" style="max-height:420px"><table><thead><tr><th>Contenedor</th><th>Tipo</th><th>Último arriendo</th><th class="num">Días en patio</th></tr></thead><tbody>
+    ${quietos.map(q=>`<tr><td>${contLink(q.c.id)}</td><td>${esc(q.c.tipo||"—")}</td><td>${q.nunca?'<span class="muted">Nunca arrendado</span>':fdate(q.ult)}</td><td class="num">${q.d==null?"—":`<b>${q.d}</b>`}</td></tr>`).join("")}</tbody></table></div>`:`<div class="pb muted">Toda la flota está en terreno.</div>`}</div>
+  </div>
+
+  <div class="grid2">
+   <div class="panel"><div class="ph"><h2>Contratos que vencen en 30 días</h2></div>${porVencer.length?`<div class="scroll"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Vence</th><th class="num">Mensual neto</th></tr></thead><tbody>
+    ${porVencer.map(c=>`<tr><td>${ctrLink(c)}</td><td>${cliLink(c.clienteId)}</td><td>${fdate(c.vence)} <span class="muted small">(${dias(h,c.vence)} días)</span></td><td class="num">${clp(mensualCtr(c))}</td></tr>`).join("")}</tbody></table></div>`:`<div class="pb muted">Ningún contrato vence en los próximos 30 días.</div>`}</div>
+   <div class="panel"><div class="ph"><h2>Clientes con 2 o más meses de atraso</h2></div>${atraso2.length?`<div class="scroll"><table><thead><tr><th>Contrato</th><th>Cliente</th><th class="num">Meses atrasados</th><th class="num">Monto c/IVA</th></tr></thead><tbody>
+    ${atraso2.map(x=>`<tr><td>${ctrLink(x.c)}</td><td>${cliLink(x.c.clienteId)}</td><td class="num"><span class="pill p-venc">${x.n}</span></td><td class="num">${clp(x.n*conIVA(mensualCtr(x.c)))}</td></tr>`).join("")}</tbody></table></div>`:`<div class="pb muted">No hay clientes con 2 o más meses de atraso.</div>`}</div>
+  </div>`;
+}
+
 // ---------- selectores ----------
 // ---------- selector con búsqueda (escribe y filtra) ----------
 function combo(id,opciones,sel,ph){const o=opciones.find(x=>x.v===sel);
@@ -687,7 +787,7 @@ function formUsuario(u){
 }
 
 // ---------- rutas y render ----------
-const RUTAS={inicio:vInicio,contratos:vContratos,contrato:vContrato,contenedores:vContenedores,clientes:vClientes,cliente:vCliente,ventas:vVentas,pagos:vPagos,mas:vMas};
+const RUTAS={inicio:vInicio,contratos:vContratos,contrato:vContrato,contenedores:vContenedores,clientes:vClientes,cliente:vCliente,ventas:vVentas,pagos:vPagos,mas:vMas,gerencia:vGerencia};
 function ruta(){const h=decodeURIComponent(location.hash.slice(1));const [r,id]=h.split("/");return RUTAS[r]?{r,id}:{r:"inicio"}}
 function render(){
   if(!S.user||!S.listo)return;
@@ -856,7 +956,7 @@ async function entrar(u){
   const perfil=get("perfiles",S.user.email);
   if(!perfil||perfil.activo===false){pantalla(`<h1>Sin acceso</h1><p style="margin:0">El correo <b>${esc(S.user.email)}</b> no tiene acceso a la plataforma. Pide al administrador que te agregue en Configuración › Usuarios.</p><button id="x-out">Salir</button>`);$("#x-out").onclick=async()=>{await sb.auth.signOut();location.reload()};return}
   S.rol=perfil.rol||"lectura";S.listo=true;
-  $("#nav").hidden=false;$("#userbox").hidden=false;$("#useremail").textContent=(perfil.nombre||S.user.email)+" · "+(ROLES[S.rol]||"");
+  $("#nav").hidden=false;$("#userbox").hidden=false;$("#nav-ger").hidden=!esAdmin();$("#useremail").textContent=(perfil.nombre||S.user.email)+" · "+(ROLES[S.rol]||"");
   $("#logout").onclick=async()=>{await sb.auth.signOut();location.reload()};
   $("#cambiar-clave").onclick=cambiarClave;
   escuchar();render();
