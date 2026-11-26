@@ -384,7 +384,9 @@ function vMas(){
     <div class="panel"><div class="scroll"><table><thead><tr><th>Correo</th><th>Nombre</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${us.map(u=>`<tr><td>${esc(u.id)}</td><td>${esc(u.nombre||"—")}</td><td>${esc(ROLES[u.rol]||u.rol)}</td><td>${u.activo===false?'<span class="pill p-venc">Bloqueado</span>':'<span class="pill p-disp">Activo</span>'}</td><td class="num">${esAdmin()&&u.id!==S.user.email?`<button class="sm" data-user-edit="${esc(u.id)}">Editar</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`}
   if(tab==="respaldo"){
     cuerpo=`<div class="panel"><div class="pb" style="display:flex;flex-direction:column;gap:14px">
-     <p style="margin:0">Descarga una copia completa de la plataforma (contenedores, clientes, contratos, pagos, ventas, proveedores y tipos). Guárdala en Drive o en tu correo, idealmente una vez por semana.</p>
+     <p style="margin:0">Descarga una copia completa de la plataforma (contenedores, clientes, contratos, pagos, ventas, proveedores y tipos).</p>
+     <p style="margin:0"><b>Respaldo automático:</b> cada 7 días, cuando un administrador entra a la plataforma, se descarga sola una copia en la carpeta Descargas de ese computador. Mueve esas copias a una carpeta sincronizada con Google Drive u OneDrive.</p>
+     <p style="margin:0;${respaldoPendiente()?"color:var(--bad)":""}">Último respaldo: <b>${esc(txtRespaldo())}</b></p>
      <div class="row"><button class="primary" data-accion="respaldo">Descargar respaldo completo</button></div>
      ${esAdmin()?`<hr><p style="margin:0"><b>Restaurar o importar:</b> carga un respaldo descargado desde aquí. Los registros del archivo reemplazan a los que tengan el mismo identificador; el resto se mantiene.</p>
      <div class="row"><label class="btn" style="cursor:pointer">Elegir archivo…<input type="file" id="rest-file" accept=".json,application/json" hidden></label></div>`:""}
@@ -448,7 +450,7 @@ function vGerencia(){
   const atraso2=[...I.deuda.entries()].map(([id,p])=>({c:get("contratos",id),n:p.filter(x=>dias(x.vence,h)>5).length})).filter(x=>x.c&&x.n>=2).sort((a,b)=>b.n-a.n);
 
   const barra=(v,max,col)=>`<div class="gbar"><i style="width:${max?Math.max(v?1.5:0,v/max*100):0}%;background:${col}"></i></div>`;
-  return`<div class="row between"><h1>Gerencia</h1><span class="status">Resumen del negocio · ${fdate(h)}</span></div>
+  return`<div class="row between"><h1>Gerencia</h1><span class="status">Resumen del negocio · ${fdate(h)} · Último respaldo: <span style="${respaldoPendiente()?"color:var(--bad)":""}">${esc(txtRespaldo())}</span></span></div>
   <div class="tiles gtiles">
     <div class="tile"><span class="k">Ingresos últimos 12 meses</span><span class="v">${clp(tot12)}</span><span class="s">arriendos cobrados + ventas, con IVA</span></div>
     <div class="tile"><span class="k">Cobrado ${fper(per)}</span><span class="v">${clp(cobradoPer)}</span><span class="s">${pctCob}% de ${clp(esperado)} esperado</span><div class="bar" aria-hidden="true"><i style="width:${pctCob}%;background:var(--ok)"></i></div></div>
@@ -860,11 +862,15 @@ function exportar(t){
   if(t==="pagos")filas=[["Contrato","Cliente","Período","Fecha pago","Factura","Monto"],...all("pagos").sort((a,b)=>(a.periodo||"").localeCompare(b.periodo||"")).map(p=>{const c=get("contratos",p.contratoId);return[c?.numero,cliNom(c?.clienteId),p.periodo,p.fecha,p.factura,p.monto]})];
   descargar(`${t}-dima-${hoy()}.csv`,csv(filas),"text/csv");
 }
-function respaldo(){
+async function respaldo(auto){
   const tablas=Object.fromEntries(TABLAS.filter(t=>t!=="perfiles").map(t=>[t,all(t)]));
   descargar(`respaldo-dima-${hoy()}.json`,JSON.stringify({version:2,fecha:new Date().toISOString(),tablas}),"application/json");
-  toast("Respaldo descargado");
+  toast(auto?"Respaldo semanal automático descargado en tu computador (carpeta Descargas).":"Respaldo descargado",auto?7000:2800);
+  if(puedeEditar())await guardar("config",{id:"respaldo",ultimo:new Date().toISOString(),auto:!!auto});
 }
+const ultRespaldo=()=>get("config","respaldo")||null;
+const respaldoPendiente=()=>{const r=ultRespaldo();return!r?.ultimo||dias(r.ultimo.slice(0,10),hoy())>=7};
+const txtRespaldo=()=>{const r=ultRespaldo();return r?.ultimo?`${fdate(r.ultimo.slice(0,10))} (${r.auto?"automático":"manual"}${r.por?", "+r.por:""})`:"nunca"};
 async function leerArchivo(input){
   const f=input.files&&input.files[0];if(!f)return;input.value="";
   let o;try{o=JSON.parse(await f.text())}catch(e){toast("El archivo no es un respaldo válido.");return}
@@ -960,6 +966,7 @@ async function entrar(u){
   $("#logout").onclick=async()=>{await sb.auth.signOut();location.reload()};
   $("#cambiar-clave").onclick=cambiarClave;
   escuchar();render();
+  if(esAdmin()&&respaldoPendiente())setTimeout(()=>respaldo(true),2000);
 }
 sb.auth.onAuthStateChange((ev,ses)=>{
   if(ev==="PASSWORD_RECOVERY"){recuperando=true;pantallaNuevaClave();return}
